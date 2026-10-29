@@ -34,3 +34,16 @@ for f in target/linux/sunxi/cortexa53/config-6.18; do
   sed -i 's/^CONFIG_SUN55I_IOMMU=y/# CONFIG_SUN55I_IOMMU is not set/' "$f"
   grep -n "SUN55I_IOMMU" "$f"
 done
+
+# ---------------------------------------------------------------------------
+# Kernel: build the Kerberos 5 crypto library (crypto/krb5, split out in 6.15)
+# into the kernel. kmod-fs-nfs-common-rpcsec (pulled in by nfsd) ships
+# rpcsec_gss_krb5.ko but not krb5.ko, so packaging fails with "missing
+# dependencies ... krb5.ko" (run 40896284581). Built-in, nothing is missing.
+# ---------------------------------------------------------------------------
+for f in target/linux/sunxi/cortexa53/config-6.18; do
+  [ -f "$f" ] || continue
+  sed -i '/CONFIG_CRYPTO_KRB5[ =]/d' "$f"
+  echo 'CONFIG_CRYPTO_KRB5=y' >> "$f"
+  grep -n "CRYPTO_KRB5" "$f"
+done
