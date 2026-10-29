@@ -60,3 +60,6 @@ ccache is saved between runs, so a re-run is much faster than the first.
 Packages that build a Rust or Node toolchain from source (dufs, shadow-tls,
 node) plus gdb and BTF debug info — each adds an hour or more to a build that
 must stay under the 6h Actions limit. Install later with opkg if needed.
+
+NaiveProxy is also off: it builds Chromium's network stack and the `gn` host
+tool from source, and `gn` fails to build on this tree.
