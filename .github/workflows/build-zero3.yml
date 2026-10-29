@@ -53,7 +53,7 @@ jobs:
             /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/kotlinc /usr/local/bin/minikube \
             /etc/skel/.cargo /home/runner/.rustup /home/runner/.cargo 2>/dev/null || true
           sudo docker image prune -af >/dev/null 2>&1 || true
-          df -h /
+          df -h / /mnt 2>/dev/null || true
 
       - name: Initialize environment
         env:
@@ -70,8 +70,17 @@ jobs:
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           sudo timedatectl set-timezone "$TZ"
-          sudo mkdir -p /workdir
-          sudo chown $USER:$GROUPS /workdir
+          # Public-repo runners may also have a separate /mnt disk; build on
+          # whichever of / and /mnt has more free space.
+          df -h / /mnt 2>/dev/null || true
+          ROOT_AV=$(df --output=avail / | tail -1)
+          MNT_AV=$(df --output=avail /mnt 2>/dev/null | tail -1); MNT_AV=${MNT_AV:-0}
+          if [ "$MNT_AV" -gt "$ROOT_AV" ]; then
+            sudo mkdir -p /mnt/workdir && sudo ln -sfn /mnt/workdir /workdir
+          else
+            sudo mkdir -p /workdir
+          fi
+          sudo chown -h $USER:$GROUPS /workdir; sudo chown $USER:$GROUPS "$(readlink -f /workdir)"
           echo "CPU: $(nproc) cores"; free -h
 
       - name: Clone source code
@@ -146,8 +155,8 @@ jobs:
           # Disk watchdog: a runner that dies of ENOSPC uploads no log at all,
           # so print usage every 10 min (and the biggest dirs when it gets low).
           ( while sleep 600; do
-              echo "::group::disk $(date +%H:%M)"; df -h / | tail -1
-              [ "$(df --output=avail / | tail -1)" -lt 8000000 ] && \
+              echo "::group::disk $(date +%H:%M)"; df -h "$(readlink -f /workdir)" | tail -1
+              [ "$(df --output=avail "$(readlink -f /workdir)" | tail -1)" -lt 8000000 ] && \
                 du -xsh build_dir/* staging_dir/* dl tmp .ccache 2>/dev/null | sort -h | tail -12
               echo "::endgroup::"
             done ) &
