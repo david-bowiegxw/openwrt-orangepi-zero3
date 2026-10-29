@@ -160,9 +160,36 @@ jobs:
                 du -xsh build_dir/* staging_dir/* dl tmp .ccache 2>/dev/null | sort -h | tail -12
               echo "::endgroup::"
             done ) &
-          # IGNORE_ERRORS=1: one broken package must not sink a multi-hour run;
-          # the manifest check below lists anything that didn't make it.
-          make -j$(nproc) IGNORE_ERRORS=1 || make -j1 V=s IGNORE_ERRORS=1
+          # lede reads IGNORE_ERRORS=1 as "n m" only: a failing =y package still
+          # stops the run, so each 2.5h run surfaced one broken package. Instead
+          # keep going past every failure ('n m y'), then switch off the
+          # packages that failed and rebuild: everything else is already built,
+          # so the extra rounds only redo the rootfs/image.
+          : > /tmp/autodropped.txt
+          for round in 1 2 3 4; do
+            echo "::group::make round $round"
+            make -j$(nproc) IGNORE_ERRORS='n m y' && { echo "::endgroup::"; break; }
+            echo "::endgroup::"
+            ls bin/targets/*/*/*.img.gz >/dev/null 2>&1 && break
+            dirs=$(cat logs/*/error.txt logs/*/*/error.txt 2>/dev/null \
+              | sed -n 's/.*ERROR: \([^ ]*\) .*failed to build.*/\1/p' | sort -u)
+            echo "failed: $dirs"
+            [ -n "$dirs" ] || break
+            new=0
+            for d in $dirs; do
+              case "$d" in package/feeds/*|package/network/*|package/utils/*|package/libs/*|package/devel/*) ;;
+                *) echo "::error::core component failed: $d"; continue ;; esac
+              for p in $(awk -v mk="$d/Makefile" '/^Source-Makefile:/{on=($2==mk)} on&&/^Package:/{print $2}' tmp/.packageinfo); do
+                grep -q "^CONFIG_PACKAGE_$p=y" .config || continue
+                sed -i "s/^CONFIG_PACKAGE_$p=y/# CONFIG_PACKAGE_$p is not set/" .config
+                echo "$p ($d)" | tee -a /tmp/autodropped.txt; new=1
+              done
+            done
+            [ $new = 1 ] || { echo "::error::nothing left to drop"; break; }
+            rm -f logs/*/error.txt logs/*/*/error.txt
+            make defconfig
+          done
+          echo "=== auto-dropped after failing to build ==="; cat /tmp/autodropped.txt
           ls bin/targets/*/*/*.img.gz
           echo "status=success" >> $GITHUB_OUTPUT
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
@@ -199,6 +226,14 @@ jobs:
           ls logs/package/*/*/compile.txt 2>/dev/null | xargs -r grep -l 'Error [0-9]' 2>/dev/null | head -50 || true
           df -hT /workdir
 
+      - name: Upload build logs
+        if: steps.compile.outputs.status != 'success' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: openwrt/logs
+          if-no-files-found: ignore
+
       - name: Organize files
         id: organize
         if: env.UPLOAD_FIRMWARE == 'true' && steps.compile.outputs.status == 'success' && !cancelled()
@@ -209,6 +244,9 @@ jobs:
             echo
             echo "Flash: gunzip the *sdcard.img.gz (squashfs) and dd it to a SPARE SD card."
             echo "Boots on 192.168.1.2, DHCP off, gateway/DNS 192.168.1.1. root password = lede default."
+            echo
+            echo "Auto-dropped (failed to build):"
+            cat /tmp/autodropped.txt 2>/dev/null
             echo
             echo "Requested but not in image:"
             cat /tmp/missing.txt 2>/dev/null || echo "(none)"
