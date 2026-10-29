@@ -42,6 +42,19 @@ jobs:
           docker-images: true
           swap-storage: true
 
+      - name: Free more disk space
+        run: |
+          # The private-repo runner has one ~73G disk and no /mnt; the action
+          # above still leaves ~29G used. Run 40854958119 died of ENOSPC.
+          sudo rm -rf /usr/share/swift /usr/local/.ghcup /opt/ghc /usr/lib/jvm /opt/az \
+            /usr/share/miniconda /usr/local/share/powershell /usr/local/share/chromium \
+            /opt/microsoft /opt/google /usr/local/lib/node_modules /usr/local/share/boost \
+            /usr/share/az_* /opt/hostedtoolcache /usr/local/julia* /opt/mssql-tools \
+            /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/kotlinc /usr/local/bin/minikube \
+            /etc/skel/.cargo /home/runner/.rustup /home/runner/.cargo 2>/dev/null || true
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          df -h /
+
       - name: Initialize environment
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -69,10 +82,14 @@ jobs:
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
           echo "LEDE_COMMIT=$(git -C openwrt rev-parse --short HEAD)" >> $GITHUB_ENV
 
+      # ccache (C/C++) + Go build cache, carried between runs. If a run hits
+      # the step timeout, the next run resumes far faster.
       - name: Restore ccache
         uses: actions/cache/restore@v4
         with:
-          path: openwrt/.ccache
+          path: |
+            openwrt/.ccache
+            openwrt/tmp/go-build
           key: ccache-zero3-${{ github.run_id }}
           restore-keys: ccache-zero3-
 
@@ -125,6 +142,15 @@ jobs:
         run: |
           cd openwrt
           echo -e "$(nproc) thread compile"
+          export CCACHE_MAXSIZE=4G
+          # Disk watchdog: a runner that dies of ENOSPC uploads no log at all,
+          # so print usage every 10 min (and the biggest dirs when it gets low).
+          ( while sleep 600; do
+              echo "::group::disk $(date +%H:%M)"; df -h / | tail -1
+              [ "$(df --output=avail / | tail -1)" -lt 8000000 ] && \
+                du -xsh build_dir/* staging_dir/* dl tmp .ccache 2>/dev/null | sort -h | tail -12
+              echo "::endgroup::"
+            done ) &
           # IGNORE_ERRORS=1: one broken package must not sink a multi-hour run;
           # the manifest check below lists anything that didn't make it.
           make -j$(nproc) IGNORE_ERRORS=1 || make -j1 V=s IGNORE_ERRORS=1
@@ -138,7 +164,9 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: openwrt/.ccache
+          path: |
+            openwrt/.ccache
+            openwrt/tmp/go-build
           key: ccache-zero3-${{ github.run_id }}
 
       - name: Manifest check & size report
