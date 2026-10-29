@@ -21,3 +21,16 @@ exit 0
 EOF
 
 grep -n "192.168.1.2\|Zero3" package/base-files/files/bin/config_generate || echo "WARN: config_generate patch did not apply"
+
+# ---------------------------------------------------------------------------
+# Kernel: turn off the Allwinner A523/A527 IOMMU driver (sun55i-iommu).
+# lede synced it from ImmortalWrt, but its attach_dev() still has the old
+# 2-arg signature while 6.18.58 expects 3 args -> -Werror kills the whole
+# sunxi kernel build (run 40843042474). The Zero3 is an H618 and only needs
+# SUN50I_IOMMU. Drop this once lede fixes the driver.
+# ---------------------------------------------------------------------------
+for f in target/linux/sunxi/cortexa53/config-6.18; do
+  [ -f "$f" ] || continue
+  sed -i 's/^CONFIG_SUN55I_IOMMU=y/# CONFIG_SUN55I_IOMMU is not set/' "$f"
+  grep -n "SUN55I_IOMMU" "$f"
+done
