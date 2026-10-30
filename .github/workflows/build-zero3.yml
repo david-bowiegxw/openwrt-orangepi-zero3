@@ -227,7 +227,8 @@ jobs:
           df -hT /workdir
 
       - name: Upload build logs
-        if: steps.compile.outputs.status != 'success' && !cancelled()
+        # always: a package can fail while the image still builds (vim-fuller in run 40953329507)
+        if: '!cancelled()'
         uses: actions/upload-artifact@v4
         with:
           name: build-logs

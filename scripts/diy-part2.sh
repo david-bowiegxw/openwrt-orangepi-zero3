@@ -47,3 +47,32 @@ for f in target/linux/sunxi/cortexa53/config-6.18; do
   echo 'CONFIG_CRYPTO_KRB5=y' >> "$f"
   grep -n "CRYPTO_KRB5" "$f"
 done
+
+# ---------------------------------------------------------------------------
+# perf: tools/perf in 6.18 errors out when libelf can do zstd and NO_LIBZSTD
+# is set ("libzstd is required by libelf", run 40928226751). lede's Makefile
+# still hardcodes NO_LIBZSTD=1, so link zstd instead.
+# ---------------------------------------------------------------------------
+f=package/devel/perf/Makefile
+if [ -f "$f" ]; then
+  sed -i '/^\tNO_LIBZSTD=1 \\$/d' "$f"
+  sed -i 's/^\(  DEPENDS:= +libelf +libdw\) /\1 +libzstd /' "$f"
+  grep -nE "DEPENDS:=|NO_LIBZSTD" "$f"
+fi
+
+# ---------------------------------------------------------------------------
+# NaiveProxy: helloworld builds it from Chromium source and its gn host tool
+# fails (run 40896284581). Swap in the passwall-packages version, which just
+# unpacks klzgrad's prebuilt OpenWrt binary (sha256-pinned per arch).
+# ---------------------------------------------------------------------------
+NP=feeds/helloworld/naiveproxy
+PW=https://raw.githubusercontent.com/Openwrt-Passwall/openwrt-passwall-packages/54f65c7e1852006517a8b342ac91c8b7386a89be/naiveproxy
+if [ -d "$NP" ]; then
+  rm -rf "$NP"/*
+  mkdir -p "$NP/files"
+  curl -fsSL --retry 5 -o "$NP/Makefile" "$PW/Makefile" &&
+  curl -fsSL --retry 5 -o "$NP/files/naiveproxy.config" "$PW/files/naiveproxy.config" &&
+  curl -fsSL --retry 5 -o "$NP/files/naiveproxy.init" "$PW/files/naiveproxy.init" ||
+    echo "WARN: naiveproxy swap failed"
+  grep -nE "^PKG_VERSION|^PKG_SOURCE_URL" "$NP/Makefile"
+fi
