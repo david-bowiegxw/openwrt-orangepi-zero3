@@ -51,13 +51,16 @@ done
 # ---------------------------------------------------------------------------
 # perf: tools/perf in 6.18 errors out when libelf can do zstd and NO_LIBZSTD
 # is set ("libzstd is required by libelf", run 40928226751). lede's Makefile
-# still hardcodes NO_LIBZSTD=1, so link zstd instead.
+# still hardcodes NO_LIBZSTD=1, so link zstd instead. It also builds BPF
+# skeletons by default, whose bootstrap bpftool goes to the host gcc with the
+# target CFLAGS ("unrecognized option -fhonour-copts", run 41094915359).
 # ---------------------------------------------------------------------------
 f=package/devel/perf/Makefile
 if [ -f "$f" ]; then
   sed -i '/^\tNO_LIBZSTD=1 \\$/d' "$f"
+  sed -i 's/^\tNO_LIBCAP=1 \\$/&\n\tBUILD_BPF_SKEL=0 \\/' "$f"
   sed -i 's/^\(  DEPENDS:= +libelf +libdw\) /\1 +libzstd /' "$f"
-  grep -nE "DEPENDS:=|NO_LIBZSTD" "$f"
+  grep -nE "DEPENDS:=|NO_LIBZSTD|BPF_SKEL" "$f"
 fi
 
 # ---------------------------------------------------------------------------
