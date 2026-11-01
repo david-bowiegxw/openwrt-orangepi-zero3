@@ -79,3 +79,23 @@ if [ -d "$NP" ]; then
     echo "WARN: naiveproxy swap failed"
   grep -nE "^PKG_VERSION|^PKG_SOURCE_URL" "$NP/Makefile"
 fi
+
+# ---------------------------------------------------------------------------
+# CPU: drop lede's H616/H618 1512MHz patch. Upstream's OPP table gives 1512MHz
+# only to speed bins 1/3/5 (opp-supported-hw 0x2a; bin 5 at 1.16V). lede's
+# patch rewrites it to 0x2b with a flat 1.1V, i.e. it also hands 1512MHz to
+# bin 0, the lowest grade. Our board reads 0x2000 from the efuse = bin 0 and
+# under that patch it oopsed or reset silently a few minutes after every boot
+# (2026-10-31/11-01; stable once capped at 1.32GHz, power and SD card ruled
+# out). Without the patch the kernel builds the right table per chip: bin 0
+# tops out at 1416MHz, better bins still get 1512MHz.
+# ---------------------------------------------------------------------------
+found=0
+for p in target/linux/sunxi/patches-6.*/*.patch; do
+  [ -f "$p" ] || continue
+  if grep -q 'sun50i-h616-cpu-opp.dtsi' "$p" && grep -q 'opp-supported-hw = <0x2b>' "$p"; then
+    echo "removing H616 1512MHz-for-all-bins patch: $p"
+    rm -f "$p"; found=1
+  fi
+done
+[ "$found" = 1 ] || echo "WARN: lede H616 1512MHz patch not found (renamed or dropped upstream?)"

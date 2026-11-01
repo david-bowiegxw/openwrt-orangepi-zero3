@@ -1,0 +1,21 @@
+#!/bin/sh
+# CPU frequency defaults for the H618 (runs once, after luci-app-cpufreq's own
+# 10-cpufreq). schedutil follows load, so there's no performance loss; the
+# floor goes down to the lowest OPP (480MHz) for low idle power. The ceiling
+# is whatever the kernel's OPP table allows for this chip's speed bin
+# (1416MHz on bin 0, 1512MHz on better bins), never a hard-coded 1512MHz.
+P=/sys/devices/system/cpu/cpufreq/policy0
+[ -r "$P/cpuinfo_max_freq" ] || exit 0
+MIN=$(cat "$P/cpuinfo_min_freq")
+MAX=$(cat "$P/cpuinfo_max_freq")
+uci -q batch <<EOT
+set cpufreq.cpufreq=settings
+set cpufreq.cpufreq.governor0='schedutil'
+set cpufreq.cpufreq.minfreq0='$MIN'
+set cpufreq.cpufreq.maxfreq0='$MAX'
+set cpufreq.global=settings
+set cpufreq.global.set='1'
+commit cpufreq
+EOT
+/etc/init.d/cpufreq restart 2>/dev/null
+exit 0

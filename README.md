@@ -87,6 +87,28 @@ LuCI + Argon 主题（默认），简体中文
 - 主机名 `Zero3`，时区 Asia/Shanghai，Argon 主题
 - **固件里不放任何密码。** root 密码是 lede 默认的 `password`，刷完自己改
 
+## CPU 频率：不用 lede 的 1512MHz 补丁
+
+H618 每颗芯片出厂时会把体质档位（speed bin，0–5 共 6 档）烧进 efuse，Linux 按档位决定这颗芯片能用哪些频率和电压。
+上游内核的频率表（`sun50i-h616-cpu-opp.dtsi`）里，**1512MHz 只给 bin 1、3、5**（bin 5 还要 1.16V），最低的 bin 0 最高 1416MHz。
+
+lede 带了一个补丁（6.18 叫 `911-…add-more-cpu-operating-points`，6.12 叫 `440-…fix-cpu-max-freq`），
+把 1512MHz 放开给 bin 0，电压统一 1.1V。对 bin 0 的芯片来说这就是超频。
+
+家里这块板子 efuse 读出来是 `0x2000`，正是 bin 0。用带这个补丁的固件时，
+**开机几分钟后就会随机内核崩溃或无声重启**。换电源、换 SD 卡都没用，把 CPU 锁在 1.32GHz 后才稳定（2026-10-31 至 11-01 排查）。
+
+所以这个固件做了两件事：
+
+- `scripts/diy-part2.sh` **编译前删掉这个补丁**，恢复上游频率表。内核按芯片的实际档位给频率：bin 0 最高 1416MHz，体质更好的芯片照样能到 1512MHz
+- `files/etc/uci-defaults/95-cpufreq` **首次启动设置 CPU 调频**：schedutil 按负载升降频，性能不打折；最低频率 480MHz，待机更省电；最高频率读内核允许的上限，不写死
+
+不建议靠加电压把 bin 0 推到 1512MHz：板子的设备树把 CPU 电压上限定在 1.1V，上游连 bin 5 跑 1512MHz 都要 1.16V。
+这样只能多出约 7% 的频率，换来的是没人验证过的稳定性风险，对旁路由不划算。
+
+想看自己这颗芯片的档位，在板子上执行 `hexdump -n 2 -e '"%04x\n"' /sys/bus/nvmem/devices/sunxi-sid0/nvmem`：
+`2000` 和 `5d00` 是 bin 0，`5000`/`5400`/`6000` 是 bin 3。完整对照见内核 `drivers/cpufreq/sun50i-cpufreq-nvmem.c`。
+
 ## USB 只有 2.0
 
 H618 没有 USB 3 控制器，所有 USB 口都是 480Mbps。USB 硬盘和 USB 网卡实际都在 35–40MB/s、300–350Mbps 左右。
@@ -123,3 +145,4 @@ Actions → *Build OrangePi Zero3* → Run workflow。日志里有两项检查�
 | nfsd 打包缺 `krb5.ko` | `CONFIG_CRYPTO_KRB5` 编进内核 |
 | perf 在 6.18 上要求 libelf 带 zstd，lede 写死了 `NO_LIBZSTD` | 去掉该项，加 `libzstd` 依赖 |
 | helloworld 的 NaiveProxy 要编 Chromium，`gn` 编不过 | 换成 passwall-packages 的版本，直接用 klzgrad 发布的 OpenWrt 预编译程序 |
+| lede 的 H616 补丁把 1512MHz 放开给最低体质的 bin 0 芯片，导致死机 | 删掉该补丁，恢复上游频率表（见上面“CPU 频率”一节） |
